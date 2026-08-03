@@ -1,5 +1,4 @@
 use reqwest::StatusCode;
-use std::fmt;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -7,10 +6,7 @@ pub enum Error {
     Auth(String),
 
     #[error("HTTP error {status}: {body}")]
-    Http {
-        status: StatusCode,
-        body: String,
-    },
+    Http { status: StatusCode, body: String },
 
     #[error("JSON deserialization error: {0}")]
     Json(#[from] serde_json::Error),
@@ -26,6 +22,9 @@ pub enum Error {
 
     #[error("Pagination stream ended with error: {0}")]
     Pagination(String),
+
+    #[error("No results returned: {0}")]
+    EmptyResults(String),
 
     #[error("Missing API key. Set MASSIVE_API_KEY env var or pass api_key to the client.")]
     MissingApiKey,

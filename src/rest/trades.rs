@@ -1,8 +1,8 @@
 use crate::client::{Client, RequestOptions};
 use crate::error::Result;
 use crate::models::{LastTrade, Trade};
-use crate::paginate::PaginatedStream;
 use futures::Stream;
+use std::future::Future;
 
 /// Trades API.
 pub trait TradesApi {
@@ -18,11 +18,11 @@ pub trait TradesApi {
     ) -> impl Stream<Item = Result<Trade>>;
 
     /// Get the last trade for a ticker.
-    async fn get_last_trade(
+    fn get_last_trade(
         &self,
         ticker: &str,
         options: Option<&RequestOptions>,
-    ) -> Result<LastTrade>;
+    ) -> impl Future<Output = Result<LastTrade>> + Send;
 }
 
 impl TradesApi for Client {
@@ -33,38 +33,40 @@ impl TradesApi for Client {
         order: Option<&str>,
         limit: Option<i64>,
         sort: Option<&str>,
-        _options: Option<&RequestOptions>,
+        options: Option<&RequestOptions>,
     ) -> impl Stream<Item = Result<Trade>> {
         let path = format!("/v3/trades/{}", ticker);
-        let mut params: Vec<(&str, &str)> = Vec::new();
+        let mut params: Vec<(String, String)> = Vec::new();
         if let Some(t) = timestamp {
-            params.push(("timestamp", t));
+            params.push(("timestamp".into(), t.to_string()));
         }
         if let Some(o) = order {
-            params.push(("order", o));
+            params.push(("order".into(), o.to_string()));
         }
         if let Some(l) = limit {
-            params.push(("limit", &l.to_string()));
+            params.push(("limit".into(), l.to_string()));
         }
         if let Some(s) = sort {
-            params.push(("sort", s));
+            params.push(("sort".into(), s.to_string()));
         }
         if self.pagination {
-            self.paginate::<Trade>(&path, Some(&params))
+            self.paginate::<Trade>(&path, Some(&params), options)
         } else {
-            self.single_page::<Trade>(&path, Some(&params))
+            self.single_page::<Trade>(&path, Some(&params), options)
         }
     }
 
     async fn get_last_trade(
         &self,
         ticker: &str,
-        _options: Option<&RequestOptions>,
+        options: Option<&RequestOptions>,
     ) -> Result<LastTrade> {
         let path = format!("/v2/last/trade/{}", ticker);
         #[derive(serde::Deserialize)]
-        struct Resp { results: LastTrade }
-        let resp: Resp = self.get(&path, None, None).await?;
+        struct Resp {
+            results: LastTrade,
+        }
+        let resp: Resp = self.get(&path, None, options).await?;
         Ok(resp.results)
     }
 }

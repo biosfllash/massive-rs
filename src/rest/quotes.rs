@@ -1,8 +1,8 @@
 use crate::client::{Client, RequestOptions};
 use crate::error::Result;
 use crate::models::{LastQuote, Quote};
-use crate::paginate::PaginatedStream;
 use futures::Stream;
+use std::future::Future;
 
 /// Quotes (NBBO) API.
 pub trait QuotesApi {
@@ -18,11 +18,11 @@ pub trait QuotesApi {
     ) -> impl Stream<Item = Result<Quote>>;
 
     /// Get the last quote for a ticker.
-    async fn get_last_quote(
+    fn get_last_quote(
         &self,
         ticker: &str,
         options: Option<&RequestOptions>,
-    ) -> Result<LastQuote>;
+    ) -> impl Future<Output = Result<LastQuote>> + Send;
 }
 
 impl QuotesApi for Client {
@@ -33,38 +33,38 @@ impl QuotesApi for Client {
         order: Option<&str>,
         limit: Option<i64>,
         sort: Option<&str>,
-        _options: Option<&RequestOptions>,
+        options: Option<&RequestOptions>,
     ) -> impl Stream<Item = Result<Quote>> {
         let path = format!("/v3/quotes/{}", ticker);
-        let mut params: Vec<(&str, &str)> = Vec::new();
+        let mut params: Vec<(String, String)> = Vec::new();
         if let Some(t) = timestamp {
-            params.push(("timestamp", t));
+            params.push(("timestamp".into(), t.to_string()));
         }
         if let Some(o) = order {
-            params.push(("order", o));
+            params.push(("order".into(), o.to_string()));
         }
         if let Some(l) = limit {
-            params.push(("limit", &l.to_string()));
+            params.push(("limit".into(), l.to_string()));
         }
         if let Some(s) = sort {
-            params.push(("sort", s));
+            params.push(("sort".into(), s.to_string()));
         }
         if self.pagination {
-            self.paginate::<Quote>(&path, Some(&params))
+            self.paginate::<Quote>(&path, Some(&params), options)
         } else {
-            self.single_page::<Quote>(&path, Some(&params))
+            self.single_page::<Quote>(&path, Some(&params), options)
         }
     }
 
     async fn get_last_quote(
         &self,
         ticker: &str,
-        _options: Option<&RequestOptions>,
+        options: Option<&RequestOptions>,
     ) -> Result<LastQuote> {
         let path = format!("/v2/last/nbbo/{}", ticker);
         #[derive(serde::Deserialize)]
         struct Resp { results: LastQuote }
-        let resp: Resp = self.get(&path, None, None).await?;
+        let resp: Resp = self.get(&path, None, options).await?;
         Ok(resp.results)
     }
 }
