@@ -1,13 +1,12 @@
 use crate::client::{Client, RequestOptions};
 use crate::error::Result;
 use crate::models::{LastTrade, Trade};
-use futures::Stream;
 use std::future::Future;
 
 /// Trades API.
 pub trait TradesApi {
-    /// List trades for a ticker (paginated stream).
-    fn list_trades(
+    /// Get recent trades for a ticker (single page, bounded by `limit`).
+    fn get_trades(
         &self,
         ticker: &str,
         timestamp: Option<&str>,
@@ -15,7 +14,7 @@ pub trait TradesApi {
         limit: Option<i64>,
         sort: Option<&str>,
         options: Option<&RequestOptions>,
-    ) -> impl Stream<Item = Result<Trade>>;
+    ) -> impl Future<Output = Result<Vec<Trade>>> + Send;
 
     /// Get the last trade for a ticker.
     fn get_last_trade(
@@ -26,7 +25,7 @@ pub trait TradesApi {
 }
 
 impl TradesApi for Client {
-    fn list_trades(
+    async fn get_trades(
         &self,
         ticker: &str,
         timestamp: Option<&str>,
@@ -34,7 +33,7 @@ impl TradesApi for Client {
         limit: Option<i64>,
         sort: Option<&str>,
         options: Option<&RequestOptions>,
-    ) -> impl Stream<Item = Result<Trade>> {
+    ) -> Result<Vec<Trade>> {
         let path = format!("/v3/trades/{}", ticker);
         let mut params: Vec<(String, String)> = Vec::new();
         if let Some(t) = timestamp {
@@ -49,11 +48,12 @@ impl TradesApi for Client {
         if let Some(s) = sort {
             params.push(("sort".into(), s.to_string()));
         }
-        if self.pagination {
-            self.paginate::<Trade>(&path, Some(&params), options)
-        } else {
-            self.single_page::<Trade>(&path, Some(&params), options)
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            results: Option<Vec<Trade>>,
         }
+        let resp: Resp = self.get(&path, Some(&params), options).await?;
+        Ok(resp.results.unwrap_or_default())
     }
 
     async fn get_last_trade(

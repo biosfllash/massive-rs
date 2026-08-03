@@ -4,8 +4,7 @@ Async Rust client for the [Massive](https://massive.com) (formerly Polygon.io)
 REST and WebSocket APIs.
 
 - Typed REST endpoints for aggregates, trades, and quotes
-- Automatic pagination: `list_*` methods return a `Stream` that follows
-  `next_url` for you
+- Single-page REST calls with `limit`-bounded results
 - Real-time WebSocket streaming with automatic ping/pong keep-alive
 - `rustls`-only TLS (no OpenSSL needed)
 - Fully offline test suite (`wiremock` HTTP mocks + a local WebSocket server)
@@ -14,10 +13,10 @@ REST and WebSocket APIs.
 
 | Area       | Trait / type                | Endpoints                                                       |
 | ---------- | --------------------------- | --------------------------------------------------------------- |
-| Aggregates | `AggsApi`                   | bars (`get_aggs` / `list_aggs`), grouped daily, open/close, prev |
-| Snapshots  | `SnapshotApi`               | current ticker snapshot, universal snapshot                      |
-| Trades     | `TradesApi`                 | history (`list_trades`), last trade (`get_last_trade`)          |
-| Quotes     | `QuotesApi`                 | history (`list_quotes`), last NBBO quote (`get_last_quote`)     |
+| Aggregates | `AggsApi`                   | bars (`get_aggs`), grouped daily, open/close, prev             |
+| Snapshots  | `SnapshotApi`               | current ticker snapshot, universal snapshot                     |
+| Trades     | `TradesApi`                 | history (`get_trades`), last trade (`get_last_trade`)          |
+| Quotes     | `QuotesApi`                 | history (`get_quotes`), last NBBO quote (`get_last_quote`)     |
 | WebSocket  | `WebSocketClient`           | connect / auth / subscribe / receive raw JSON frames             |
 | Models     | `models`                    | `aggs`, `trades`, `quotes`, `snapshot`, `tickers`, `financials` |
 
@@ -44,8 +43,7 @@ cargo run -- AAPL
 
 This prints the last 30 days of daily bars for `AAPL`, the **current snapshot**
 (last trade, today's change, today's day bar), the latest trade, the latest NBBO
-quote, and a few trades from the paginated stream. Pass any ticker (defaults to
-`AAPL`):
+quote, and a few recent trades. Pass any ticker (defaults to `AAPL`):
 
 ```sh
 cargo run -- MSFT
@@ -74,7 +72,6 @@ The stream prints raw JSON frames until you press Ctrl+C.
 Import the client and the trait for the endpoints you need:
 
 ```rust
-use futures::StreamExt;
 use massive::{AggsApi, Client, QuotesApi, TradesApi};
 
 let client = Client::from_env()?; // reads MASSIVE_API_KEY
@@ -88,18 +85,13 @@ server or proxy).
 ### Aggregates (`AggsApi`)
 
 ```rust
-// Single page of daily bars
+// Daily bars for a date range, limited to 5
 let bars = client
     .get_aggs("AAPL", 1, "day", "2024-01-01", "2024-01-31",
               None, Some("desc"), Some(5), None)
     .await?;
-
-// Full history as a paginated stream
-let mut bars = client
-    .list_aggs("AAPL", 1, "day", "2020-01-01", "2024-01-01",
-               None, None, None, None);
-while let Some(bar) = bars.next().await {
-    println!("{:?}", bar?);
+for bar in bars {
+    println!("{:?}", bar);
 }
 ```
 
@@ -128,9 +120,11 @@ println!("session price: {:?}", usnap.session.as_ref().and_then(|s| s.price));
 ```rust
 let last = client.get_last_trade("AAPL", None).await?;
 
-let mut trades = client.list_trades("AAPL", None, None, Some(100), None, None);
-while let Some(trade) = trades.next().await {
-    println!("{:?}", trade?);
+let trades = client
+    .get_trades("AAPL", None, None, Some(100), None, None)
+    .await?;
+for trade in trades {
+    println!("{:?}", trade);
 }
 ```
 
@@ -139,19 +133,22 @@ while let Some(trade) = trades.next().await {
 ```rust
 let last = client.get_last_quote("AAPL", None).await?;
 
-let mut quotes = client.list_quotes("AAPL", None, None, Some(100), None, None);
-while let Some(quote) = quotes.next().await {
-    println!("{:?}", quote?);
+let quotes = client
+    .get_quotes("AAPL", None, None, Some(100), None, None)
+    .await?;
+for quote in quotes {
+    println!("{:?}", quote);
 }
 ```
 
-### Pagination & per-request options
+### Per-request options
 
-- `list_*` methods return a `Stream<Item = Result<T>>` that automatically
-  follows the `next_url` cursor across pages (requires `futures::StreamExt`).
-- `client.with_pagination(false)` disables automatic pagination (single page).
-- `RequestOptions` adds per-request headers, e.g. the Massive Launchpad edge
-  headers:
+History endpoints (`get_aggs`, `get_trades`, `get_quotes`) return a single
+page of results. Use the `limit` parameter to control how many records come
+back; the API caps it at 50,000 per request.
+
+`RequestOptions` adds per-request headers, e.g. the Massive Launchpad edge
+headers:
 
 ```rust
 use massive::RequestOptions;

@@ -11,7 +11,6 @@
 //!   cargo run -- ws AAPL MSFT
 //!   cargo run -- ws --all
 
-use futures::StreamExt;
 use massive::error::Result;
 use massive::{
     AggsApi, Client, QuotesApi, SnapshotApi, TradesApi, WebSocketClient, STOCKS_ENDPOINT,
@@ -119,21 +118,17 @@ async fn rest_demo(client: &Client, ticker: &str) -> Result<()> {
         fmt_ts(quote.sip_timestamp),
     );
 
-    println!("\n== First 3 trades via the paginated stream ==");
-    let mut stream = client.list_trades(&ticker, None, None, Some(3), None, None);
-    let mut seen = 0;
-    while let Some(trade) = stream.next().await {
-        let trade = trade?;
+    println!("\n== First 3 trades ==");
+    let trades = client
+        .get_trades(&ticker, None, None, Some(3), None, None)
+        .await?;
+    for trade in trades.into_iter().take(3) {
         println!(
             "  {}  price={:.2} size={:.0}",
             fmt_ts(trade.sip_timestamp),
             trade.price.unwrap_or_default(),
             trade.size.unwrap_or_default(),
         );
-        seen += 1;
-        if seen >= 3 {
-            break;
-        }
     }
 
     Ok(())

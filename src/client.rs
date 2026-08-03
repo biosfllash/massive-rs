@@ -1,8 +1,6 @@
 use crate::error::{Error, Result};
-use crate::paginate::PaginatedStream;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT_ENCODING, AUTHORIZATION, USER_AGENT};
 use std::time::Duration;
-use tracing::info;
 
 const DEFAULT_BASE: &str = "https://api.massive.com";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -41,8 +39,6 @@ pub struct Client {
     pub(crate) api_key: String,
     pub(crate) base: String,
     pub(crate) http: reqwest::Client,
-    pub(crate) pagination: bool,
-    pub(crate) trace: bool,
 }
 
 impl Client {
@@ -60,8 +56,6 @@ impl Client {
             api_key,
             base: DEFAULT_BASE.to_string(),
             http,
-            pagination: true,
-            trace: false,
         })
     }
 
@@ -78,18 +72,6 @@ impl Client {
     /// Set a custom base URL (defaults to `https://api.massive.com`).
     pub fn with_base(mut self, base: impl Into<String>) -> Self {
         self.base = base.into();
-        self
-    }
-
-    /// Enable or disable automatic pagination (default: true).
-    pub fn with_pagination(mut self, pagination: bool) -> Self {
-        self.pagination = pagination;
-        self
-    }
-
-    /// Enable request/response tracing.
-    pub fn with_trace(mut self, trace: bool) -> Self {
-        self.trace = trace;
         self
     }
 
@@ -132,18 +114,8 @@ impl Client {
             req = req.query(p);
         }
 
-        if self.trace {
-            info!("Request URL: {}", url);
-            let redacted = self.default_headers();
-            info!("Request Headers: {:?}", redacted);
-        }
-
         let resp = req.send().await?;
         let status = resp.status();
-
-        if self.trace {
-            info!("Response Status: {}", status);
-        }
 
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
@@ -152,41 +124,5 @@ impl Client {
 
         let data = resp.json().await?;
         Ok(data)
-    }
-
-    /// Start a paginated stream.
-    pub(crate) fn paginate<T: serde::de::DeserializeOwned + Send + 'static>(
-        &self,
-        path: &str,
-        params: Option<&[(String, String)]>,
-        options: Option<&RequestOptions>,
-    ) -> PaginatedStream<T> {
-        let mut url = format!("{}{}", self.base, path);
-        if let Some(p) = params {
-            let query = serde_urlencoded::to_string(p).unwrap_or_default();
-            if !query.is_empty() {
-                url.push('?');
-                url.push_str(&query);
-            }
-        }
-        PaginatedStream::new(self.http.clone(), url, self.request_headers(options))
-    }
-
-    /// Single page request (no pagination follow).
-    pub(crate) fn single_page<T: serde::de::DeserializeOwned + Send + 'static>(
-        &self,
-        path: &str,
-        params: Option<&[(String, String)]>,
-        options: Option<&RequestOptions>,
-    ) -> PaginatedStream<T> {
-        let mut url = format!("{}{}", self.base, path);
-        if let Some(p) = params {
-            let query = serde_urlencoded::to_string(p).unwrap_or_default();
-            if !query.is_empty() {
-                url.push('?');
-                url.push_str(&query);
-            }
-        }
-        PaginatedStream::single_page(self.http.clone(), url, self.request_headers(options))
     }
 }

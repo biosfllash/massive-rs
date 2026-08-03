@@ -12,99 +12,6 @@ use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[tokio::test]
-async fn paginated_stream_sends_auth_and_follows_next_url() {
-    let server = MockServer::start().await;
-
-    // First page: two results plus a `next_url` cursor.
-    Mock::given(method("GET"))
-        .and(path(
-            "/v2/aggs/ticker/AAPL/range/1/day/2024-01-01/2024-01-02",
-        ))
-        .and(query_param("limit", "2"))
-        .and(header("authorization", "Bearer test-key"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "results": [
-                {"o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 100.0, "t": 1704067200000i64, "n": 10},
-                {"o": 2.0, "h": 3.0, "l": 1.5, "c": 2.5, "v": 200.0, "t": 1704153600000i64, "n": 20}
-            ],
-            "next_url": format!("{}/v2/next/2?cursor=2", server.uri())
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    // Second page: reached via `next_url`, must also carry the auth header.
-    Mock::given(method("GET"))
-        .and(path("/v2/next/2"))
-        .and(query_param("cursor", "2"))
-        .and(header("authorization", "Bearer test-key"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "results": [
-                {"o": 3.0, "h": 4.0, "l": 2.5, "c": 3.5, "v": 300.0, "t": 1704240000000i64, "n": 30}
-            ],
-            "next_url": null
-        })))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let client = Client::new("test-key").unwrap().with_base(server.uri());
-
-    let mut stream = client.list_aggs(
-        "AAPL",
-        1,
-        "day",
-        "2024-01-01",
-        "2024-01-02",
-        None,
-        None,
-        Some(2),
-        None,
-    );
-
-    let mut aggs: Vec<_> = Vec::new();
-    while let Some(agg) = stream.next().await {
-        aggs.push(agg.unwrap());
-    }
-
-    assert_eq!(aggs.len(), 3);
-    assert_eq!(aggs[0].open, Some(1.0));
-    assert_eq!(aggs[1].open, Some(2.0));
-    assert_eq!(aggs[2].open, Some(3.0));
-    assert_eq!(aggs[2].timestamp, Some(1704240000000i64));
-}
-
-#[tokio::test]
-async fn paginated_stream_surfaces_http_errors() {
-    let server = MockServer::start().await;
-
-    Mock::given(method("GET"))
-        .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
-        .mount(&server)
-        .await;
-
-    let client = Client::new("test-key").unwrap().with_base(server.uri());
-
-    let mut stream = client.list_aggs(
-        "AAPL",
-        1,
-        "day",
-        "2024-01-01",
-        "2024-01-02",
-        None,
-        None,
-        None,
-        None,
-    );
-
-    let err = stream.next().await.unwrap().unwrap_err();
-    assert!(
-        matches!(err, crate::error::Error::Http { status, .. } if status.as_u16() == 500),
-        "expected HTTP 500 error, got: {err}"
-    );
-}
-
-#[tokio::test]
 async fn client_get_sends_auth_header() {
     let server = MockServer::start().await;
 
@@ -529,123 +436,64 @@ async fn snapshot_empty_results_is_an_error() {
 }
 
 // ---------------------------------------------------------------------------
-// Pagination
+// Trades & quotes history
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn single_page_mode_does_not_follow_next_url() {
+async fn get_trades_parses_results() {
     let server = MockServer::start().await;
 
-    // First page: results plus a `next_url` cursor.
     Mock::given(method("GET"))
-        .and(path("/v2/aggs/ticker/AAPL/range/1/day/2024-01-01/2024-01-02"))
+        .and(path("/v3/trades/AAPL"))
+        .and(query_param("limit", "3"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "results": [
-                {"o": 1.0, "h": 2.0, "l": 0.5, "c": 1.5, "v": 100.0, "t": 1704067200000i64, "n": 10},
-                {"o": 2.0, "h": 3.0, "l": 1.5, "c": 2.5, "v": 200.0, "t": 1704153600000i64, "n": 20}
-            ],
-            "next_url": format!("{}/v2/next/2", server.uri())
+                {"T": "AAPL", "p": 150.25, "s": 10, "t": 1704067200000i64},
+                {"T": "AAPL", "p": 150.30, "s": 5, "t": 1704067260000i64}
+            ]
         })))
         .expect(1)
         .mount(&server)
         .await;
 
-    // If pagination were followed, this mock would receive a request and the
-    // `expect(0)` would fail the test.
-    Mock::given(method("GET"))
-        .and(path("/v2/next/2"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "results": []
-        })))
-        .expect(0)
-        .mount(&server)
-        .await;
-
-    let client = Client::new("test-key")
+    let trades = Client::new("test-key")
         .unwrap()
         .with_base(server.uri())
-        .with_pagination(false);
+        .get_trades("AAPL", None, None, Some(3), None, None)
+        .await
+        .unwrap();
 
-    let mut stream = client.list_aggs(
-        "AAPL",
-        1,
-        "day",
-        "2024-01-01",
-        "2024-01-02",
-        None,
-        None,
-        None,
-        None,
-    );
-
-    let mut items: Vec<_> = Vec::new();
-    while let Some(item) = stream.next().await {
-        items.push(item.unwrap());
-    }
-
-    assert_eq!(items.len(), 2);
+    assert_eq!(trades.len(), 2);
+    assert_eq!(trades[0].price, Some(150.25));
+    assert_eq!(trades[0].sip_timestamp, Some(1704067200000i64));
 }
 
 #[tokio::test]
-async fn stream_ends_cleanly_on_empty_page() {
+async fn get_quotes_parses_results() {
     let server = MockServer::start().await;
 
     Mock::given(method("GET"))
+        .and(path("/v3/quotes/AAPL"))
+        .and(query_param("limit", "3"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "results": null,
-            "next_url": null
+            "results": [
+                {"P": 150.26, "p": 150.24, "S": 80, "s": 40, "t": 1704067200000i64}
+            ]
         })))
         .expect(1)
         .mount(&server)
         .await;
 
-    let client = Client::new("test-key").unwrap().with_base(server.uri());
+    let quotes = Client::new("test-key")
+        .unwrap()
+        .with_base(server.uri())
+        .get_quotes("AAPL", None, None, Some(3), None, None)
+        .await
+        .unwrap();
 
-    let mut stream = client.list_aggs(
-        "AAPL",
-        1,
-        "day",
-        "2024-01-01",
-        "2024-01-02",
-        None,
-        None,
-        None,
-        None,
-    );
-
-    assert!(stream.next().await.is_none());
-}
-
-#[tokio::test]
-async fn stream_yields_error_then_ends() {
-    let server = MockServer::start().await;
-
-    Mock::given(method("GET"))
-        .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
-        .mount(&server)
-        .await;
-
-    let client = Client::new("test-key").unwrap().with_base(server.uri());
-
-    let mut stream = client.list_aggs(
-        "AAPL",
-        1,
-        "day",
-        "2024-01-01",
-        "2024-01-02",
-        None,
-        None,
-        None,
-        None,
-    );
-
-    let mut items: Vec<_> = Vec::new();
-    while let Some(item) = stream.next().await {
-        items.push(item);
-    }
-
-    assert_eq!(items.len(), 1);
-    assert!(items[0].is_err());
+    assert_eq!(quotes.len(), 1);
+    assert_eq!(quotes[0].ask_price, Some(150.26));
+    assert_eq!(quotes[0].bid_price, Some(150.24));
 }
 
 // ---------------------------------------------------------------------------

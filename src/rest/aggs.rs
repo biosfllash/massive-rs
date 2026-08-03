@@ -1,27 +1,11 @@
 use crate::client::{Client, RequestOptions};
 use crate::error::Result;
 use crate::models::{Agg, DailyOpenCloseAgg, GroupedDailyAgg, PreviousCloseAgg};
-use futures::Stream;
 use std::future::Future;
 
 /// Aggregates (OHLCV bars) API.
 pub trait AggsApi {
-    /// List aggregate bars for a ticker over a given date range.
-    /// Returns a stream that automatically paginates through all pages.
-    fn list_aggs(
-        &self,
-        ticker: &str,
-        multiplier: i64,
-        timespan: &str,
-        from: &str,
-        to: &str,
-        adjusted: Option<bool>,
-        sort: Option<&str>,
-        limit: Option<i64>,
-        options: Option<&RequestOptions>,
-    ) -> impl Stream<Item = Result<Agg>>;
-
-    /// Get aggregate bars (single page, no pagination follow).
+    /// Get aggregate bars for a ticker over a given date range.
     fn get_aggs(
         &self,
         ticker: &str,
@@ -65,39 +49,6 @@ pub trait AggsApi {
 }
 
 impl AggsApi for Client {
-    fn list_aggs(
-        &self,
-        ticker: &str,
-        multiplier: i64,
-        timespan: &str,
-        from: &str,
-        to: &str,
-        adjusted: Option<bool>,
-        sort: Option<&str>,
-        limit: Option<i64>,
-        options: Option<&RequestOptions>,
-    ) -> impl Stream<Item = Result<Agg>> {
-        let path = format!(
-            "/v2/aggs/ticker/{}/range/{}/{}/{}/{}",
-            ticker, multiplier, timespan, from, to
-        );
-        let mut params: Vec<(String, String)> = Vec::new();
-        if let Some(a) = adjusted {
-            params.push(("adjusted".into(), a.to_string()));
-        }
-        if let Some(s) = sort {
-            params.push(("sort".into(), s.to_string()));
-        }
-        if let Some(l) = limit {
-            params.push(("limit".into(), l.to_string()));
-        }
-        if self.pagination {
-            self.paginate::<Agg>(&path, Some(&params), options)
-        } else {
-            self.single_page::<Agg>(&path, Some(&params), options)
-        }
-    }
-
     async fn get_aggs(
         &self,
         ticker: &str,

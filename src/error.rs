@@ -2,9 +2,6 @@ use reqwest::StatusCode;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("API authentication failed: {0}")]
-    Auth(String),
-
     #[error("HTTP error {status}: {body}")]
     Http { status: StatusCode, body: String },
 
@@ -14,14 +11,8 @@ pub enum Error {
     #[error("Request error: {0}")]
     Reqwest(#[from] reqwest::Error),
 
-    #[error("URL parse error: {0}")]
-    Url(#[from] url::ParseError),
-
     #[error("WebSocket error: {0}")]
     WebSocket(String),
-
-    #[error("Pagination stream ended with error: {0}")]
-    Pagination(String),
 
     #[error("No results returned: {0}")]
     EmptyResults(String),
