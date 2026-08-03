@@ -168,18 +168,70 @@ async fn realtime(tickers: &[String]) -> Result<()> {
     println!("Waiting for messages... (Ctrl+C to stop)");
 
     let stdout = std::io::stdout();
+    let mut count: u64 = 0;
     while let Some(msg) = ws.next().await {
-        let mut out = stdout.lock();
-        let _ = writeln!(out, "{}", msg?);
+        let msg = msg?;
+
+        if all {
+            // The all-symbols feed is extremely hot; only report every
+            // Nth event, showing event time, receive time, and latency.
+            count += 1;
+            if count % ALL_SYMBOLS_LOG_EVERY == 0 {
+                log_event(&msg, count);
+            }
+        } else {
+            let mut out = stdout.lock();
+            let _ = writeln!(out, "{msg}");
+        }
     }
 
     Ok(())
+}
+
+/// When subscribed to all symbols, log one line every N received events.
+const ALL_SYMBOLS_LOG_EVERY: u64 = 50_000;
+
+/// Extract the event timestamp (epoch millis) from a raw feed message.
+/// Trade/quote/aggregate events carry it in the `t` field (some channels
+/// use `timestamp`); status messages have none.
+fn event_ts_millis(msg: &str) -> Option<i64> {
+    let v: serde_json::Value = serde_json::from_str(msg).ok()?;
+    v.get("t")
+        .or_else(|| v.get("timestamp"))
+        .and_then(|t| t.as_i64().or_else(|| t.as_f64().map(|f| f as i64)))
+}
+
+/// Log the event's timestamp, the local system timestamp, and the latency
+/// (how long after the event occurred we received it).
+fn log_event(msg: &str, count: u64) {
+    let now = chrono::Utc::now();
+    let now_millis = now.timestamp_millis();
+    match event_ts_millis(msg) {
+        Some(ts) => println!(
+            "[{count}] event_ts={} system_ts={} latency={}ms",
+            fmt_ts_ms(Some(ts)),
+            fmt_ts_ms(Some(now_millis)),
+            now_millis - ts,
+        ),
+        None => println!(
+            "[{count}] event_ts=- system_ts={} latency=-",
+            fmt_ts_ms(Some(now_millis)),
+        ),
+    }
 }
 
 /// Format an epoch-millis timestamp as `YYYY-MM-DD`.
 fn fmt_day(millis: Option<i64>) -> String {
     match millis.and_then(chrono::DateTime::from_timestamp_millis) {
         Some(dt) => dt.format("%Y-%m-%d").to_string(),
+        None => "-".to_owned(),
+    }
+}
+
+/// Format an epoch-millis timestamp as `YYYY-MM-DD HH:MM:SS.mmm`.
+fn fmt_ts_ms(millis: Option<i64>) -> String {
+    match millis.and_then(chrono::DateTime::from_timestamp_millis) {
+        Some(dt) => dt.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
         None => "-".to_owned(),
     }
 }
