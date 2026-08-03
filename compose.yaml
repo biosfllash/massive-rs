@@ -1,0 +1,13 @@
+# Minimal compose for the massive-rs demo binary.
+#
+# The API key is read from the host `.env` (or your shell) and passed to the
+# container at runtime — never baked into the image.
+#
+#   docker compose up --build            # AAPL REST demo
+#   docker compose run massive MSFT      # REST demo for another ticker
+#   docker compose run massive ws AAPL   # WebSocket demo
+services:
+  massive:
+    build: .
+    environment:
+      MASSIVE_API_KEY: ${MASSIVE_API_KEY:?set MASSIVE_API_KEY in .env or your shell}
