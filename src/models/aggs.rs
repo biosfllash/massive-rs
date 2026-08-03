@@ -68,9 +68,13 @@ pub struct DailyOpenCloseAgg {
 pub struct PreviousCloseAgg {
     #[serde(rename = "T")]
     pub ticker: Option<String>,
+    #[serde(rename = "c")]
     pub close: Option<f64>,
+    #[serde(rename = "h")]
     pub high: Option<f64>,
+    #[serde(rename = "l")]
     pub low: Option<f64>,
+    #[serde(rename = "o")]
     pub open: Option<f64>,
     #[serde(rename = "t")]
     pub timestamp: Option<f64>,

@@ -25,6 +25,8 @@ pub struct PaginatedStream<T> {
     next_url: Option<String>,
     buffer: Vec<T>,
     pending: Option<Pin<Box<dyn Future<Output = Result<PaginatedResponse<T>>> + Send>>>,
+    /// Whether the stream follows `next_url` cursors (false in single-page mode).
+    follow: bool,
 }
 
 impl<T: DeserializeOwned + Send + 'static> PaginatedStream<T> {
@@ -35,6 +37,7 @@ impl<T: DeserializeOwned + Send + 'static> PaginatedStream<T> {
             next_url: Some(initial_url),
             buffer: Vec::new(),
             pending: None,
+            follow: true,
         }
     }
 
@@ -45,6 +48,7 @@ impl<T: DeserializeOwned + Send + 'static> PaginatedStream<T> {
             next_url: Some(url),
             buffer: Vec::new(),
             pending: None,
+            follow: false,
         }
     }
 }
@@ -99,7 +103,8 @@ impl<T: DeserializeOwned + Send + Unpin + 'static> Stream for PaginatedStream<T>
                     }
                     Poll::Ready(Ok(page)) => {
                         this.pending = None;
-                        this.next_url = page.next_url;
+                        // In single-page mode the cursor is discarded.
+                        this.next_url = if this.follow { page.next_url } else { None };
                         if let Some(mut results) = page.results {
                             results.reverse(); // so we can pop from the end
                             this.buffer = results;
