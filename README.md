@@ -65,7 +65,54 @@ Or everything at once via wildcards (no tickers / `--all` also work):
 cargo run -- ws --all
 ```
 
-The stream prints raw JSON frames until you press Ctrl+C.
+For specific tickers the stream prints raw JSON frames until you press Ctrl+C.
+When subscribed to **all symbols** (`--all`), the feed is extremely hot, so
+instead of every frame it logs only every 50,000th event with its event
+timestamp, system receive time, and end-to-end latency.
+
+## Docker
+
+Build the image (multi-stage build; the runtime stage is a slim
+`debian:bookworm-slim` with just the `massive` binary and `ca-certificates`):
+
+```sh
+docker build -t massive:latest .
+```
+
+The API key is **never baked into the image** — pass it at runtime:
+
+```sh
+# REST demo (defaults to AAPL)
+docker run -e MASSIVE_API_KEY=... massive:latest
+
+# REST demo for a specific ticker
+docker run -e MASSIVE_API_KEY=... massive:latest MSFT
+
+# Realtime WebSocket demo
+docker run -e MASSIVE_API_KEY=... massive:latest ws AAPL MSFT
+
+# All symbols (throttled logging, see above)
+docker run -e MASSIVE_API_KEY=... massive:latest ws --all
+```
+
+With Compose (reads the key from your `.env`):
+
+```sh
+docker compose run massive ws AAPL
+```
+
+The Dockerfile uses `ENTRYPOINT ["massive"]`, so everything after the image
+name is passed straight to the executable — no `--` separator needed (that's a
+`cargo run`-only convention). To make the WebSocket demo the *default* command,
+add a `CMD` to the Dockerfile:
+
+```dockerfile
+ENTRYPOINT ["massive"]
+CMD ["ws", "AAPL"]   # default: massive ws AAPL
+```
+
+Any args you pass on the command line override `CMD`, so `docker run ... MSFT`
+still runs the REST demo.
 
 ## REST API
 
